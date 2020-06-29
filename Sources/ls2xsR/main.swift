@@ -25,6 +25,7 @@ struct Ls2XsR: ParsableCommand {
             baseLproj.ibFiles.forEach { ibFile in
                 print("generating .strings for \(ibFile.url.path)")
                 let baseStringsFile = ibFile.makeBaseStringsFile(name: ibFile.name)
+                guard !baseStringsFile.keyValues.isEmpty else { return }
                 langs.forEach { lang in
                     guard let localizableStringsFile = stringFiles[lang] else { fatalError("Oh, no") }
                     var langStringsFile = LangStringsFile(lang: lang, baseStringsFile: baseStringsFile)
