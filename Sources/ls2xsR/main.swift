@@ -19,12 +19,18 @@ struct Ls2XsR: ParsableCommand {
                 baseLprojFiles.append(baseLprojFile)
             }
         }
-//        print(stringFiles["ja"]!.url)
-//        print(stringFiles["ja"]!.keyValues.map { "\($0.key) = \($0.value)" }.joined(separator: "\n"))
+
+        let langs = Array(stringFiles.keys)
         baseLprojFiles.forEach { baseLproj in
             baseLproj.ibFiles.forEach { ibFile in
-                print("generating \(ibFile.baseStringsFile)")
-                ibFile.generateBaseStringsFile(ibFile.baseStringsFile)
+                print("generating .strings for \(ibFile.url.path)")
+                let baseStringsFile = ibFile.makeBaseStringsFile(name: ibFile.name)
+                langs.forEach { lang in
+                    guard let localizableStringsFile = stringFiles[lang] else { fatalError("Oh, no") }
+                    var langStringsFile = LangStringsFile(lang: lang, baseStringsFile: baseStringsFile)
+                    langStringsFile.update(from: baseStringsFile, with: localizableStringsFile)
+                    langStringsFile.save()
+                }
             }
         }
     }
@@ -52,24 +58,34 @@ final class BaseLprojFile {
 // MARK: - IbFile
 
 protocol IbFile {
+    typealias Key = String
     var url: URL { get }
     /// File name without  extension
     var name: String { get }
-    var baseStringsFile: BaseStringsFile { get }
-    func generateBaseStringsFile(_ baseStringFile: BaseStringsFile)
+    func makeBaseStringsFile(name: String) -> BaseStringsFile
 }
 
 extension IbFile {
-    func generateBaseStringsFile(_ baseStringFile: BaseStringsFile) {
-        let generateStringsFile: Process = { task, url, baseStringsFile in
+    func makeBaseStringsFile(name: String) -> BaseStringsFile {
+        generate(from: self, to: "\(name).strings")
+        let baseStringFile = BaseStringsFile(ibFileUrl: url, name: name)
+        baseStringFile.keyValues = { url in
+            guard let keyValues = NSDictionary(contentsOf: url) as? [IbFile.Key: Localize.Key] else { fatalError("huga") }
+            return keyValues
+        }(baseStringFile.url)
+        return baseStringFile
+    }
+
+    private func generate(from ibFile: IbFile, to baseStringsFileName: String) {
+        let generateStringsFile: Process = { task, ibFileUrl, baseStringsFileUrl in
             task.launchPath = "/usr/bin/ibtool"
             task.arguments = [
-                url.path,
+                ibFileUrl.path,
                 "--generate-strings-file",
-                baseStringsFile.url.path,
+                baseStringsFileUrl.path,
             ]
             return task
-        }(Process(), url, baseStringsFile)
+        }(Process(), ibFile.url, ibFile.url.deletingLastPathComponent().appendingPathComponent(baseStringsFileName))
         generateStringsFile.launch()
         generateStringsFile.waitUntilExit()
     }
@@ -78,40 +94,47 @@ extension IbFile {
 struct XibFile: IbFile {
     let url: URL
     let name: String
-    let baseStringsFile: BaseStringsFile
 
     init?(url: URL) {
         guard url.pathExtension == "xib" else { return nil }
         self.url = url
-        let name = url.deletingPathExtension().lastPathComponent
-        self.name = name
-        baseStringsFile = BaseStringsFile(ibFileUrl: url, name: name)
+        name = url.deletingPathExtension().lastPathComponent
     }
 }
 
 struct StoryboardFile: IbFile {
     let url: URL
     let name: String
-    let baseStringsFile: BaseStringsFile
 
     init?(url: URL) {
         guard url.pathExtension == "storyboard" else { return nil }
         self.url = url
-        let name = url.deletingPathExtension().lastPathComponent
-        self.name = name
-        baseStringsFile = BaseStringsFile(ibFileUrl: url, name: name)
+        name = url.deletingPathExtension().lastPathComponent
     }
+}
+
+// MARK: - StringsFiles
+
+struct Localize {
+    typealias Key = String
+}
+struct Localized {
+    typealias Value = String
 }
 
 // MARK: BaseStringsFile
 
-struct BaseStringsFile: CustomStringConvertible {
+final class BaseStringsFile: CustomStringConvertible {
     let url: URL
+    let fullname: String
+    var keyValues: [IbFile.Key: Localize.Key] = [:]
 
     init(ibFileUrl: URL, name: String) {
+        let fullname = "\(name).strings"
         url = ibFileUrl
             .deletingLastPathComponent()
-            .appendingPathComponent("\(name).strings")
+            .appendingPathComponent(fullname)
+        self.fullname = fullname
     }
 
     var description: String {
@@ -119,15 +142,53 @@ struct BaseStringsFile: CustomStringConvertible {
     }
 }
 
-// MARK: - LocalizableStringsFile
+// MARK: LangStringsFile
 
-final class LocalizableStringsFile {
-    typealias Key = String
-    typealias Value = String
-
+struct LangStringsFile {
     let url: URL
     let lang: String
-    private(set) var keyValues: [Key: Value]
+    var keyValues: [IbFile.Key: Localized.Value] = [:]
+
+    init(lang: String, baseStringsFile: BaseStringsFile) {
+        url = baseStringsFile.url
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(lang).lproj")
+            .appendingPathComponent("\(baseStringsFile.fullname)")
+        self.lang = lang
+    }
+
+    mutating func update(from baseStringsFile: BaseStringsFile, with localizableString: LocalizableStringsFile) {
+        baseStringsFile.keyValues.forEach { (ibKey, localizeKey) in
+            if let localizedValue = localizableString.keyValues[localizeKey] {
+                keyValues[ibKey] = localizedValue
+            }
+        }
+    }
+
+    func save() {
+        let output = keyValues.map({ ibKey, localizedValue in
+            #""\#(ibKey)" = "\#(localizedValue)";\#n"#
+            })
+            .sorted()
+            .joined()
+
+        do {
+            let dir = url.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try output.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            fatalError("Howdy")
+        }
+    }
+}
+
+// MARK: LocalizableStringsFile
+
+final class LocalizableStringsFile {
+    let url: URL
+    let lang: String
+    private(set) var keyValues: [Localize.Key: Localized.Value]
 
     init?(url: URL) {
         let lang = url.deletingLastPathComponent().deletingPathExtension().lastPathComponent
@@ -140,8 +201,8 @@ final class LocalizableStringsFile {
         self.keyValues = keyValues
     }
 
-    private static func readKeyValues(in url: URL) -> [Key: Value]? {
-        guard let rawKeyValues = NSDictionary(contentsOf: url) as? [Key: Value] else { return nil }
+    private static func readKeyValues(in url: URL) -> [Localize.Key: Localized.Value]? {
+        guard let rawKeyValues = NSDictionary(contentsOf: url) as? [Localize.Key: Localized.Value] else { return nil }
         return rawKeyValues.mapValues { value in
             String(value.flatMap { (char: Character) -> [Character] in
                 switch char {
