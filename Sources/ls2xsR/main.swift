@@ -21,9 +21,11 @@ struct Ls2XsR: ParsableCommand {
         }
 //        print(stringFiles["ja"]!.url)
 //        print(stringFiles["ja"]!.keyValues.map { "\($0.key) = \($0.value)" }.joined(separator: "\n"))
-        baseLprojFiles.forEach { base in
-            print("Base: \(base.url)")
-            print("    [\(base.ibFiles.map(\.name).joined(separator: ", "))]")
+        baseLprojFiles.forEach { baseLproj in
+            baseLproj.ibFiles.forEach { ibFile in
+                print("generating \(ibFile.baseStringsFile)")
+                ibFile.generateBaseStringsFile(ibFile.baseStringsFile)
+            }
         }
     }
 }
@@ -53,27 +55,67 @@ protocol IbFile {
     var url: URL { get }
     /// File name without  extension
     var name: String { get }
+    var baseStringsFile: BaseStringsFile { get }
+    func generateBaseStringsFile(_ baseStringFile: BaseStringsFile)
+}
+
+extension IbFile {
+    func generateBaseStringsFile(_ baseStringFile: BaseStringsFile) {
+        let generateStringsFile: Process = { task, url, baseStringsFile in
+            task.launchPath = "/usr/bin/ibtool"
+            task.arguments = [
+                url.path,
+                "--generate-strings-file",
+                baseStringsFile.url.path,
+            ]
+            return task
+        }(Process(), url, baseStringsFile)
+        generateStringsFile.launch()
+        generateStringsFile.waitUntilExit()
+    }
 }
 
 struct XibFile: IbFile {
     let url: URL
     let name: String
+    let baseStringsFile: BaseStringsFile
 
     init?(url: URL) {
         guard url.pathExtension == "xib" else { return nil }
         self.url = url
-        name = url.deletingPathExtension().lastPathComponent
+        let name = url.deletingPathExtension().lastPathComponent
+        self.name = name
+        baseStringsFile = BaseStringsFile(ibFileUrl: url, name: name)
     }
 }
 
 struct StoryboardFile: IbFile {
     let url: URL
     let name: String
+    let baseStringsFile: BaseStringsFile
 
     init?(url: URL) {
         guard url.pathExtension == "storyboard" else { return nil }
         self.url = url
-        name = url.deletingPathExtension().lastPathComponent
+        let name = url.deletingPathExtension().lastPathComponent
+        self.name = name
+        baseStringsFile = BaseStringsFile(ibFileUrl: url, name: name)
+    }
+}
+
+// MARK: BaseStringsFile
+
+struct BaseStringsFile: CustomStringConvertible {
+    let url: URL
+
+    init(ibFileUrl: URL, name: String) {
+        url = ibFileUrl
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(name).strings")
+    }
+
+    var description: String {
+        url.path
     }
 }
 
