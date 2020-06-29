@@ -10,17 +10,72 @@ struct Ls2XsR: ParsableCommand {
         guard let rootUrl = URL(string: currentPath)?.appendingPathComponent(path) else { fatalError("hoge") }
 
         var stringFiles: [String: LocalizableStringsFile] = [:]
+        var baseLprojFiles: [BaseLprojFile] = []
         FileManager.default.fileURLs(in: rootUrl).forEach() { url in
             if let stringFile = LocalizableStringsFile(url: url) {
                 stringFiles[stringFile.lang] = stringFile
             }
+            if let baseLprojFile = BaseLprojFile(url: url) {
+                baseLprojFiles.append(baseLprojFile)
+            }
         }
-        print(stringFiles["ja"]!.url)
-        print(stringFiles["ja"]!.keyValues.map { "\($0.key) = \($0.value)" }.joined(separator: "\n"))
+//        print(stringFiles["ja"]!.url)
+//        print(stringFiles["ja"]!.keyValues.map { "\($0.key) = \($0.value)" }.joined(separator: "\n"))
+        baseLprojFiles.forEach { base in
+            print("Base: \(base.url)")
+            print("    [\(base.ibFiles.map(\.name).joined(separator: ", "))]")
+        }
     }
 }
 
 Ls2XsR.main()
+
+// MARK: - BaseLprojFile
+
+final class BaseLprojFile {
+    let url: URL
+
+    init?(url: URL) {
+        guard url.lastPathComponent == "Base.lproj" else { return nil }
+        self.url = url
+    }
+
+    var ibFiles: [IbFile] {
+        FileManager.default.fileURLs(in: url).compactMap {
+            XibFile(url: $0) ?? StoryboardFile(url: $0)
+        }
+    }
+}
+
+// MARK: - IbFile
+
+protocol IbFile {
+    var url: URL { get }
+    /// File name without  extension
+    var name: String { get }
+}
+
+struct XibFile: IbFile {
+    let url: URL
+    let name: String
+
+    init?(url: URL) {
+        guard url.pathExtension == "xib" else { return nil }
+        self.url = url
+        name = url.deletingPathExtension().lastPathComponent
+    }
+}
+
+struct StoryboardFile: IbFile {
+    let url: URL
+    let name: String
+
+    init?(url: URL) {
+        guard url.pathExtension == "storyboard" else { return nil }
+        self.url = url
+        name = url.deletingPathExtension().lastPathComponent
+    }
+}
 
 // MARK: - LocalizableStringsFile
 
