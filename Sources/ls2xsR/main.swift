@@ -25,6 +25,7 @@ struct Ls2XsR: ParsableCommand {
             baseLproj.ibFiles.forEach { ibFile in
                 print("generating .strings for \(ibFile.url.path)")
                 let baseStringsFile = ibFile.makeBaseStringsFile(name: ibFile.name)
+                baseStringsFile.removeIfEmpty()
                 guard !baseStringsFile.keyValues.isEmpty else { return }
                 langs.forEach { lang in
                     guard let localizableStringsFile = stringFiles[lang] else { fatalError("Oh, no") }
@@ -140,6 +141,29 @@ final class BaseStringsFile: CustomStringConvertible {
 
     var description: String {
         url.path
+    }
+
+    func removeIfEmpty() {
+        func fileSize(url: URL) -> Double? {
+            try? url.resourceValues(forKeys: [.fileSizeKey])
+                .allValues
+                .first?
+                .value as? Double
+        }
+        let sizeOpt = fileSize(url: url)
+        guard let size = sizeOpt,
+            size > 4.0 else { // ibtool minimum file size
+                do {
+                    try FileManager.default.removeItem(at: url)
+                    if let size = sizeOpt {
+                        print("Remove empty file: \(url) (size: \(size))")
+                    }
+                } catch {
+                    fatalError("failed to remove file: \(url)")
+                }
+                return
+        }
+        return
     }
 }
 
