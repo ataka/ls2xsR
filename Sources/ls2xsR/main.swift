@@ -187,6 +187,8 @@ struct LangStringsFile {
         baseStringsFile.keyValues.forEach { (ibKey, localizeKey) in
             if let localizedValue = localizableString.keyValues[localizeKey] {
                 keyValues[ibKey] = localizedValue
+            } else {
+                keyValues[ibKey] = localizeKey
             }
         }
     }
